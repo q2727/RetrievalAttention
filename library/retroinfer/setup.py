@@ -22,6 +22,9 @@ ext_modules = [
                           'nvcc': ['-O3', '-std=c++17', '--expt-relaxed-constexpr']},
         extra_link_args=['-lcuda', '-lcudart'],
     ),
+    # TODO(blackwell-sm120): this extension still builds the current Sm80-specific
+    # CUTLASS kernel in `retroinfer_kernels/src/batch_gemm_softmax.cu`.
+    # Upgrade CUTLASS and migrate the kernel before using sparse RetroInfer on RTX 50 series.
     CUDAExtension(
         'retroinfer_kernels.gemm_softmax',
         sources=[f'{src_dir}/batch_gemm_softmax.cu'],

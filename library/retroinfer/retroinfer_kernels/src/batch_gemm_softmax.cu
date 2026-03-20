@@ -22,6 +22,9 @@
 #include "helper.h"
 
 #include "cutlass/arch/memory.h"
+// TODO(blackwell-sm120): this include and the ArchTag below are the main
+// architecture-specific binding points to replace when migrating this kernel
+// from Ampere/Sm80 to RTX 50 series / SM120.
 #include "cutlass/arch/memory_sm80.h"
 #include "cutlass/cutlass.h"
 #include "cutlass/gemm/device/gemm_complex.h"
@@ -85,6 +88,8 @@ void batch_gemm_softmax_impl(
     using InstructionShape = cutlass::gemm::GemmShape<16, 8, 16>;
 
     using OperatorClass = cutlass::arch::OpClassTensorOp;
+    // TODO(blackwell-sm120): replace this Sm80 tag with the CUTLASS Blackwell
+    // arch/tag path selected for the updated kernel implementation.
     using ArchTag = cutlass::arch::Sm80;
 
     // ApplyShape for final Softmax.

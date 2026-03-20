@@ -1,8 +1,6 @@
 import gc
-import re
 import torch
 import torch.nn.functional as F
-import flashinfer
 from transformers import AutoTokenizer, LlamaForCausalLM, LlamaConfig
 from .LLM import LLM
 from cache_hub import flash_attn_cache, retroinfer_cache, retroinfer_cache_gpu
@@ -10,6 +8,7 @@ from attn_hub import full_decode_attn, retroinfer_decode_attn, \
                      full_prefill_attn, prefill_xattn, prefill_minfer
 from .xattn_thresholds import llama_31_8b_8_thresholds, llama_3_8b_8_thresholds
 from .minfer_patterns import llama_31_8b_best_patterns, llama_3_8b_best_patterns
+from .utils import parse_model_size
 
 
 class LlamaLayer:
@@ -160,6 +159,7 @@ class LlamaModel(LLM):
         gc.collect()
 
         llama_config = attn_config
+        model_size = parse_model_size(self.model_name)
         
         # Init kv cache
         if self.attention_type == 'Full_Flash_Attn':
@@ -175,7 +175,7 @@ class LlamaModel(LLM):
                 layer_mapping = self.layer_mapping,
                 prefill_bsz = self.prefill_bsz,
                 num_gpus = self.num_gpus,
-                model_size = int(re.search(r'(\d+)[B]', self.model_name).group(1))
+                model_size = model_size
             )
         elif self.attention_type == 'RetroInfer':
             retroinfer_config = llama_config.get(self.attention_type)
@@ -203,7 +203,7 @@ class LlamaModel(LLM):
                     buffer_cluster_num = retroinfer_config["buffer_cluster_num"],
                     prefill_bsz = self.prefill_bsz,
                     num_gpus = self.num_gpus,
-                    model_size = int(re.search(r'(\d+)[B]', self.model_name).group(1))
+                    model_size = model_size
                 )
             else:   # Offload version
                 self.kv_cache = retroinfer_cache(
@@ -230,7 +230,7 @@ class LlamaModel(LLM):
                     use_cuda_graph = retroinfer_config["use_cuda_graph"],
                     prefill_bsz = self.prefill_bsz,
                     num_gpus = self.num_gpus,
-                    model_size = int(re.search(r'(\d+)[B]', self.model_name).group(1))
+                    model_size = model_size
                 )
         else:
             raise ValueError(f"Unsupported attention type: {self.attention_type}")
@@ -290,9 +290,8 @@ class LlamaModel(LLM):
     def mlp(self, hidden_states, layer):
         hidden_states = F.linear(hidden_states, layer.gate_up_proj)
         dim = hidden_states.shape[-1] // 2
-        hidden_shape = (hidden_states.shape[:-1] + (dim,))
-        out = torch.empty(hidden_shape, dtype=hidden_states.dtype, device=hidden_states.device)
-        flashinfer.activation.silu_and_mul(hidden_states, out)
+        gate, up = hidden_states.split(dim, dim=-1)
+        out = F.silu(gate) * up
         hidden_states = F.linear(out, layer.down_proj)
         return hidden_states 
 
@@ -310,21 +309,22 @@ class LlamaModel(LLM):
         elif self.attention_type == 'RetroInfer':
             if hidden_states.shape[1] == 1:
                 if isinstance(self.kv_cache, retroinfer_cache_gpu):
-                    self.kv_cache.gemm_o = self.kv_cache.gemm_o_dict[next_device]
-                    self.kv_cache.softmax_o = self.kv_cache.softmax_o_dict[next_device]
-                    self.kv_cache.norm = self.kv_cache.norm_dict[next_device]
-                    self.kv_cache.sum = self.kv_cache.sum_dict[next_device]
-                    self.kv_cache.dist = self.kv_cache.dist_dict[next_device]
-                    self.kv_cache.cI = self.kv_cache.cI_dict[next_device]
-                    self.kv_cache.cV = self.kv_cache.cV_dict[next_device]
-                    self.kv_cache.es_centroids = self.kv_cache.es_centroids_dict[next_device]
-                    self.kv_cache.es_value_sum = self.kv_cache.es_value_sum_dict[next_device]
-                    self.kv_cache.es_cluster_size = self.kv_cache.es_cluster_size_dict[next_device]
                     self.kv_cache.execution_buffer_keys = self.kv_cache.execution_buffer_keys_dict[next_device]
                     self.kv_cache.execution_buffer_values = self.kv_cache.execution_buffer_values_dict[next_device]
                     self.kv_cache.valid_lengths = self.kv_cache.valid_lengths_dict[next_device]
-                    self.kv_cache.static_len_tensor = self.kv_cache.static_len_tensor_dict[next_device]
-                    self.kv_cache.nprobe_tensor = self.kv_cache.nprobe_tensor_dict[next_device]
+                    if self.kv_cache.requires_sparse_runtime:
+                        self.kv_cache.gemm_o = self.kv_cache.gemm_o_dict[next_device]
+                        self.kv_cache.softmax_o = self.kv_cache.softmax_o_dict[next_device]
+                        self.kv_cache.norm = self.kv_cache.norm_dict[next_device]
+                        self.kv_cache.sum = self.kv_cache.sum_dict[next_device]
+                        self.kv_cache.dist = self.kv_cache.dist_dict[next_device]
+                        self.kv_cache.cI = self.kv_cache.cI_dict[next_device]
+                        self.kv_cache.cV = self.kv_cache.cV_dict[next_device]
+                        self.kv_cache.es_centroids = self.kv_cache.es_centroids_dict[next_device]
+                        self.kv_cache.es_value_sum = self.kv_cache.es_value_sum_dict[next_device]
+                        self.kv_cache.es_cluster_size = self.kv_cache.es_cluster_size_dict[next_device]
+                        self.kv_cache.static_len_tensor = self.kv_cache.static_len_tensor_dict[next_device]
+                        self.kv_cache.nprobe_tensor = self.kv_cache.nprobe_tensor_dict[next_device]
                 else:
                     self.kv_cache.cI = self.kv_cache.cI_dict[next_device]
                     self.kv_cache.static_len_tensor = self.kv_cache.static_len_tensor_dict[next_device]
@@ -348,22 +348,33 @@ class LlamaModel(LLM):
 
     
     def layernorm(self, hidden_states, epsilon, weight):
-        bsz, seq_len, dim = hidden_states.shape
-        hidden_states = hidden_states.reshape(bsz * seq_len, dim)
-        hidden_states = flashinfer.rmsnorm(hidden_states, weight, epsilon)
-        hidden_states = hidden_states.reshape(bsz, seq_len, dim)
-        return hidden_states
+        input_dtype = hidden_states.dtype
+        hidden_states = hidden_states.float()
+        weight = weight.float()
+        variance = hidden_states.pow(2).mean(dim=-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + epsilon)
+        hidden_states = hidden_states * weight
+        return hidden_states.to(input_dtype)
 
 
     def apply_rotary_pos_emb(self, query_states, key_states, position_ids):
         bsz, _, hidden_dim = query_states.shape
         _, _, kv_dim = key_states.shape
-        query_states = query_states.view(-1, hidden_dim)
-        key_states = key_states.view(-1, kv_dim)
-        flashinfer.rope.apply_rope_with_cos_sin_cache_inplace(position_ids, query_states, key_states, self.head_dim, self.cos_sin_cache, True)
-        query_states = query_states.view(bsz, -1, hidden_dim)
-        key_states = key_states.view(bsz, -1, kv_dim)
-        return query_states, key_states
+        seq_len = query_states.shape[1]
+        cos_sin = self.cos_sin_cache[position_ids]
+        cos = cos_sin[..., :self.head_dim // 2].to(query_states.dtype).unsqueeze(2)
+        sin = cos_sin[..., self.head_dim // 2:].to(query_states.dtype).unsqueeze(2)
+
+        query_states = query_states.view(bsz, seq_len, self.num_heads, self.head_dim // 2, 2)
+        key_states = key_states.view(bsz, seq_len, self.num_key_value_heads, self.head_dim // 2, 2)
+
+        q0, q1 = query_states[..., 0], query_states[..., 1]
+        k0, k1 = key_states[..., 0], key_states[..., 1]
+
+        query_states = torch.stack((q0 * cos - q1 * sin, q1 * cos + q0 * sin), dim=-1)
+        key_states = torch.stack((k0 * cos - k1 * sin, k1 * cos + k0 * sin), dim=-1)
+
+        return query_states.reshape(bsz, seq_len, hidden_dim), key_states.reshape(bsz, seq_len, kv_dim)
 
 
     def position_embedd(self, query_states, key_states):

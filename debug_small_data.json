@@ -1,0 +1,6 @@
+[
+  {
+    "input": "You are running a short environment check. Reply with exactly one short sentence that says the runtime path works.",
+    "outputs": "The runtime path works."
+  }
+]

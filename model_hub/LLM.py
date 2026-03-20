@@ -1,6 +1,5 @@
 import time
 import torch
-import flashinfer
 from termcolor import colored
 
 
@@ -152,11 +151,38 @@ class LLM:
             logits = logits / temperature
             probs = torch.softmax(logits, dim=-1, dtype=torch.float32)  # [bsz, 1, vocab_size]
             probs = probs.squeeze(1) # [bsz, vocab_size]
+
             if top_k != 0:
-                output_ids = flashinfer.sampling.top_k_top_p_sampling_from_probs(probs, top_p=top_p, top_k=top_k)
+                k = min(top_k, probs.shape[-1])
+                topk_probs, topk_indices = torch.topk(probs, k=k, dim=-1)
+                if top_p < 1.0:
+                    sorted_probs, sorted_order = torch.sort(topk_probs, dim=-1, descending=True)
+                    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+                    remove_mask = cumulative_probs > top_p
+                    remove_mask[..., 1:] = remove_mask[..., :-1].clone()
+                    remove_mask[..., 0] = False
+                    sorted_probs = sorted_probs.masked_fill(remove_mask, 0.0)
+                    norm = sorted_probs.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+                    sorted_probs = sorted_probs / norm
+                    sample_pos = torch.multinomial(sorted_probs, num_samples=1)
+                    sampled_order = sorted_order.gather(-1, sample_pos)
+                    output_ids = topk_indices.gather(-1, sampled_order)
+                else:
+                    norm = topk_probs.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+                    topk_probs = topk_probs / norm
+                    sample_pos = torch.multinomial(topk_probs, num_samples=1)
+                    output_ids = topk_indices.gather(-1, sample_pos)
             else:
-                output_ids = flashinfer.sampling.top_p_sampling_from_probs(probs, top_p=top_p)
-            output_ids = output_ids.unsqueeze(1) # [bsz, 1], torch.int32
+                sorted_probs, sorted_indices = torch.sort(probs, dim=-1, descending=True)
+                cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+                remove_mask = cumulative_probs > top_p
+                remove_mask[..., 1:] = remove_mask[..., :-1].clone()
+                remove_mask[..., 0] = False
+                sorted_probs = sorted_probs.masked_fill(remove_mask, 0.0)
+                norm = sorted_probs.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+                sorted_probs = sorted_probs / norm
+                sample_pos = torch.multinomial(sorted_probs, num_samples=1)
+                output_ids = sorted_indices.gather(-1, sample_pos)
 
         return output_ids
 
@@ -186,7 +212,7 @@ class LLM:
         # check if get EOS token during decoding
         if not ignore_eos:
             end_of_text = torch.zeros((self.batch_size, 1), dtype=torch.bool, device=inputs_ids.device)
-            token_id_dtype = torch.int64 if not do_sample else torch.int32  # flashinfer returns int32
+            token_id_dtype = torch.int64
             eos_token = torch.empty((self.batch_size, 1), dtype=token_id_dtype, device=inputs_ids.device).fill_(self.tokenizer.eos_token_id)
         
         # Decoding

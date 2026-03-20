@@ -1,11 +1,15 @@
 import math
 import torch
+# TODO(blackwell-sm120): keep using the current extension entrypoint here, but
+# migrate its implementation in `library/retroinfer/.../batch_gemm_softmax.cu`.
 from retroinfer_kernels import ThreadPool, WaveBufferCPU
 from retroinfer_kernels import gather_copy_vectors, reorganize_vectors, gather_copy_cluster_and_concat_fuse, batch_gemm_softmax
+from flash_attn_compat import full_attention_decode
 
 from .cache import KV_Cache
 from .kmeans import segment_k_means
-from flash_attn import flash_attn_with_kvcache
+# TODO(weighted-decode): `weighted_flash_decoding.py` now owns this interface.
+# Implement its reference semantics first, then add a Triton backend.
 from weighted_flash_decoding import weighted_flash_decoding
 
 
@@ -116,7 +120,6 @@ class retroinfer_cache_gpu(KV_Cache):
                 self.static_stride = actual_gen_len + self.static_pattern_total
                 self.list_stride = self.input_length - self.static_pattern_total
                 self.nprobe_new = 0
-
         # steady zone keys & values
         self.steady_zone_keys = [
             torch.zeros((self.batch_size, self.kv_head, self.static_stride, self.head_dim), 
@@ -666,12 +669,12 @@ class retroinfer_cache_gpu(KV_Cache):
 
         # compute attention
         self.valid_lengths.fill_(static_len)
-        attn_out = flash_attn_with_kvcache(
-                q=queries.view(self.batch_groups, 1, self.group_size, self.head_dim), 
-                k_cache=self.list_keys[layer_idx].view(self.batch_groups, self.list_stride, 1, self.head_dim),
-                v_cache=self.list_values[layer_idx].view(self.batch_groups, self.list_stride, 1, self.head_dim),
-                cache_seqlens=self.valid_lengths
-            )
+        attn_out = full_attention_decode(
+            queries.view(self.batch_groups, 1, self.group_size, self.head_dim),
+            self.list_keys[layer_idx].view(self.batch_groups, self.list_stride, 1, self.head_dim),
+            self.list_values[layer_idx].view(self.batch_groups, self.list_stride, 1, self.head_dim),
+            self.valid_lengths,
+        )
         return attn_out.view(self.batch_size, 1, self.num_heads, self.head_dim)
 
 

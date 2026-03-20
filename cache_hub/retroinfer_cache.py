@@ -1,10 +1,14 @@
 import math
 import torch
+# TODO(blackwell-sm120): keep using the current extension entrypoint here, but
+# migrate its implementation in `library/retroinfer/.../batch_gemm_softmax.cu`.
 from retroinfer_kernels import ThreadPool, WaveBufferCPU
 from retroinfer_kernels import gather_copy_and_concat, gather_copy_and_scatter, gather_copy_vectors, batch_gemm_softmax
 
 from .cache import KV_Cache
 from .kmeans import segment_k_means
+# TODO(weighted-decode): `weighted_flash_decoding.py` now owns this interface.
+# Implement its reference semantics first, then add a Triton backend.
 from weighted_flash_decoding import weighted_flash_decoding
 
 

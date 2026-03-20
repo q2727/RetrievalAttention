@@ -12,6 +12,36 @@
 
 ## :zap: Getting Started
 
+### RTX 50 Series Installation
+```bash
+conda create -n retroinfer python=3.10 -y
+conda activate retroinfer
+
+# optional but still useful for matching the original project environment
+conda install -y mkl
+conda install -c conda-forge libstdcxx-ng -y
+
+# choose the official PyTorch CUDA wheel that matches your target machine
+# example for CUDA 12.8:
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+# install the minimal runtime dependencies for the current 50-series path
+pip install -r requirements-step1.txt
+```
+
+
+Minimal validation command:
+```bash
+python -u simple_test.py \
+  --model_name Qwen/Qwen2.5-0.5B-Instruct \
+  --attn_type Full_Flash_Attn \
+  --prefill_method full \
+  --batch_size 1 \
+  --prefill_bsz 1 \
+  --gen_len 8 \
+  --data_path debug_small_data.json
+```
+
+
 ### Environment Setup
 The required dependency packages rely on `CUDA 12.4`, you can use the docker image `nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04` if your system does not have `CUDA 12.4` installed.
 
