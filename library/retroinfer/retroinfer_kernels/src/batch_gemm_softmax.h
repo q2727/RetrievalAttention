@@ -36,8 +36,8 @@
 #include <limits>
 #include <vector>
 
+#include "cutlass/arch/arch.h"
 #include "cutlass/arch/memory.h"
-#include "cutlass/arch/memory_sm80.h"
 #include "cutlass/cutlass.h"
 
 #include "cutlass/epilogue/threadblock/epilogue_visitor_with_softmax.h"
@@ -316,7 +316,9 @@ public:
   using ThreadblockSwizzle =
       cutlass::gemm::threadblock::GemmBatchedIdentityThreadblockSwizzle;
 
-  // basic GEMM kernel
+  // NOTE: this class still wraps the legacy CUTLASS 2.x `DefaultGemm` path.
+  // For RTX 50-series / SM120 we should add a separate implementation based on
+  // CUTLASS 4.x collective builders, rather than only swapping `ArchTag`.
   using DefaultGemmKernel = typename cutlass::gemm::kernel::DefaultGemm<
       ElementA, LayoutA, AlignmentA, ElementB, LayoutB, AlignmentB, ElementC,
       LayoutC, ElementCompute, OperatorClass, ArchTag, ThreadblockShape,

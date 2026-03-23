@@ -23,11 +23,15 @@ ext_modules = [
         extra_link_args=['-lcuda', '-lcudart'],
     ),
     # TODO(blackwell-sm120): this extension still builds the current Sm80-specific
-    # CUTLASS kernel in `retroinfer_kernels/src/batch_gemm_softmax.cu`.
-    # Upgrade CUTLASS and migrate the kernel before using sparse RetroInfer on RTX 50 series.
+    # CUTLASS 2.x-style kernel in `retroinfer_kernels/src/batch_gemm_softmax.cu`.
+    # RTX 50-series / SM120 needs a separate CUTLASS 4.x collective-builder port.
+    # Use CUTLASS >= 4.4.2 when starting that migration.
     CUDAExtension(
         'retroinfer_kernels.gemm_softmax',
-        sources=[f'{src_dir}/batch_gemm_softmax.cu'],
+        sources=[
+            f'{src_dir}/batch_gemm_softmax.cu',
+            f'{src_dir}/batch_gemm_softmax_sm120.cu',
+        ],
         include_dirs=[
             f"{cutlass_dir}/include",
             f"{cutlass_dir}/examples/common",

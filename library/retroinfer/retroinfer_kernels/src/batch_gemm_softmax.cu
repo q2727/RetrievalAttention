@@ -21,11 +21,8 @@
 #include "cutlass/util/reference/device/gemm.h"
 #include "helper.h"
 
+#include "cutlass/arch/arch.h"
 #include "cutlass/arch/memory.h"
-// TODO(blackwell-sm120): this include and the ArchTag below are the main
-// architecture-specific binding points to replace when migrating this kernel
-// from Ampere/Sm80 to RTX 50 series / SM120.
-#include "cutlass/arch/memory_sm80.h"
 #include "cutlass/cutlass.h"
 #include "cutlass/gemm/device/gemm_complex.h"
 
@@ -46,7 +43,9 @@
 #include "cutlass/epilogue/thread/linear_combination.h"
 #include "cutlass/layout/matrix.h"
 
+#include "batch_gemm_softmax_arch.h"
 #include "batch_gemm_softmax.h"
+#include "batch_gemm_softmax_sm120.h"
 
 
 template<typename T>
@@ -83,18 +82,16 @@ void batch_gemm_softmax_impl(
     static constexpr int AlignmentB = 128 / cutlass::sizeof_bits<ElementB>::value;
     static constexpr int AlignmentSoftmax = 128 / cutlass::sizeof_bits<ElementSoftmax>::value;
 
-    using ThreadblockShape = cutlass::gemm::GemmShape<32, 256, 32>;
-    using WarpShape = cutlass::gemm::GemmShape<32, 64, 32>;
-    using InstructionShape = cutlass::gemm::GemmShape<16, 8, 16>;
-
-    using OperatorClass = cutlass::arch::OpClassTensorOp;
-    // TODO(blackwell-sm120): replace this Sm80 tag with the CUTLASS Blackwell
-    // arch/tag path selected for the updated kernel implementation.
-    using ArchTag = cutlass::arch::Sm80;
+    using KernelConfig = retroinfer::batch_gemm_softmax::LegacySm80Config;
+    using ThreadblockShape = typename KernelConfig::ThreadblockShape;
+    using WarpShape = typename KernelConfig::WarpShape;
+    using InstructionShape = typename KernelConfig::InstructionShape;
+    using OperatorClass = typename KernelConfig::OperatorClass;
+    using ArchTag = typename KernelConfig::ArchTag;
 
     // ApplyShape for final Softmax.
     using ApplyShape = cutlass::MatrixShape<1, 1024>;
-    static int const kStages = 4;
+    static int const kStages = KernelConfig::kStages;
 
     /// Linear scaling operator
     using EpilogueFunctorOp = cutlass::epilogue::thread::LinearCombination<
@@ -190,6 +187,13 @@ void batch_gemm_softmax(
     float alpha = 1.0,
     float beta = 0.0
 ) {
+    int sm_version = retroinfer::batch_gemm_softmax::current_device_sm();
+    if (retroinfer::batch_gemm_softmax::needs_sm120_port(sm_version)) {
+        return retroinfer::batch_gemm_softmax::batch_gemm_softmax_sm120(
+            A, B, D, Norm, Sum, Softmax, batch_count, m, n, k, alpha, beta
+        );
+    }
+
     if (A.dtype() == torch::kBFloat16) {
         batch_gemm_softmax_impl<cutlass::bfloat16_t>(
             A, B, D, Norm, Sum, Softmax,
