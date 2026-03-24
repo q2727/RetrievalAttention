@@ -22,10 +22,11 @@ ext_modules = [
                           'nvcc': ['-O3', '-std=c++17', '--expt-relaxed-constexpr']},
         extra_link_args=['-lcuda', '-lcudart'],
     ),
-    # TODO(blackwell-sm120): this extension still builds the current Sm80-specific
-    # CUTLASS 2.x-style kernel in `retroinfer_kernels/src/batch_gemm_softmax.cu`.
-    # RTX 50-series / SM120 needs a separate CUTLASS 4.x collective-builder port.
-    # Use CUTLASS >= 4.4.2 when starting that migration.
+    # NOTE(blackwell-sm120): the legacy path in `batch_gemm_softmax.cu` remains
+    # Sm80/CUTLASS-specific. RTX 50-series uses `batch_gemm_softmax_sm120.cu`,
+    # which currently dispatches dense GEMM through ATen/cuBLAS and keeps the
+    # project-local CUDA rowwise softmax postprocess. A more native SM120 fused
+    # implementation can be added later without changing the Python API.
     CUDAExtension(
         'retroinfer_kernels.gemm_softmax',
         sources=[
