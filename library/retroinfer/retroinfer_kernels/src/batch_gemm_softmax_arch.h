@@ -18,25 +18,6 @@ struct LegacySm80Config {
   static constexpr int kStages = 4;
 };
 
-struct Sm120PortPlan {
-  using OperatorClass = cutlass::arch::OpClassTensorOp;
-  using ArchTag = cutlass::arch::Sm120;
-
-  // Future optimization hook for a true SM120 native implementation.
-  // The current code path already runs on RTX 50-series by using
-  // ATen/cuBLAS for dense GEMM plus a CUDA rowwise softmax postprocess.
-  // If we revisit this, the two realistic directions are:
-  // 1) CuTe DSL / custom SM120 GEMM
-  // 2) a fused SM120 epilogue specialized for RetroInfer semantics
-  using CandidateTile0 = cutlass::gemm::GemmShape<64, 64, 128>;
-  using CandidateTile1 = cutlass::gemm::GemmShape<64, 128, 128>;
-  using CandidateTile2 = cutlass::gemm::GemmShape<128, 64, 128>;
-  using CandidateTile3 = cutlass::gemm::GemmShape<128, 128, 128>;
-
-  static constexpr int kRequiredAlignment = 8;
-  static constexpr bool kRequiresCollectiveBuilderRewrite = true;
-};
-
 inline int current_device_sm() {
   int device_index = 0;
   cudaError_t status = cudaGetDevice(&device_index);
